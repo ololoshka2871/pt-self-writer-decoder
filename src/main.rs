@@ -96,28 +96,45 @@ fn main() {
         data.as_slice(),
         storage_cfg.FlashPageSize as usize,
         settings.Fref as f32,
-        true,
+        false,
     );
 
-    unpacked_pages.into_iter().for_each(|page| {
-        print!("Decoding page: {}... ", page.header.this_block_id);
-        if page.consistant {
-            page.save_as_csv(dest.join(format!(
-                "{}-0x{:08X}.csv",
-                page.header.this_block_id, page.header.data_crc32,
-            )))
-            .expect("Faild to save page");
-            println!("ok.");
-        } else {
-            std::fs::write(
-                format!(
-                    "{}-0x{:08X}-corrupted.csv",
-                    page.header.this_block_id, page.header.data_crc32,
-                ),
-                b"data corrupted",
-            )
-            .expect("Failed to write file");
-            println!("page corrupted!");
-        }
-    });
+    unpacked_pages
+        .into_iter()
+        .enumerate()
+        .for_each(|(i, page)| {
+            print!("Decoding page: {}... ", i);
+            if page.consistant {
+                let outpath = if page.header.prev_block_id == 0 && page.header.this_block_id == 0 {
+                    print!("start blockchain detected, ok.");
+                    dest.join(format!("{:06}-start-0x{:08X}.csv", i, page.header.data_crc32,))
+                } else {
+                    print!(
+                        "segment {} -> {}, ok.",
+                        page.header.prev_block_id, page.header.this_block_id
+                    );
+                    dest.join(format!(
+                        "{:06}-0x{:08X}.csv",
+                        page.header.this_block_id, page.header.data_crc32,
+                    ))
+                };
+                page.save_as_csv(outpath.clone())
+                    .expect("Faild to save page");
+                println!(" => {:?}", outpath);
+            } else if page.header.this_block_id != 0xFFFF_FFFF
+                && page.header.prev_block_id != 0xFFFF_FFFF
+            {
+                std::fs::write(
+                    dest.join(format!(
+                        "{}-corrupted-0x{:08X}.csv",
+                        i, page.header.data_crc32,
+                    )),
+                    b"data corrupted",
+                )
+                .expect("Failed to write file");
+                println!("page corrupted!");
+            } else {
+                println!("No data");
+            }
+        });
 }
