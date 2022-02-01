@@ -1,5 +1,6 @@
 mod app_settings;
 mod mem_info;
+mod report_saver;
 
 use std::{env, path::PathBuf};
 
@@ -19,6 +20,10 @@ struct Cli {
     /// Destination dirrectory for output files, default: current dirreectory
     #[structopt(long, short, parse(from_os_str))]
     dest: Option<PathBuf>,
+
+    /// Save frequencies
+    #[structopt(long, short)]
+    freq: bool,
 }
 
 fn get_dir(p: &Option<PathBuf>, direction: &str, current_dir: &PathBuf) -> PathBuf {
@@ -107,7 +112,10 @@ fn main() {
             if page.consistant {
                 let outpath = if page.header.prev_block_id == 0 && page.header.this_block_id == 0 {
                     print!("start blockchain detected, ok.");
-                    dest.join(format!("{:06}-start-0x{:08X}.csv", i, page.header.data_crc32,))
+                    dest.join(format!(
+                        "{:06}-start-0x{:08X}.csv",
+                        i, page.header.data_crc32,
+                    ))
                 } else {
                     print!(
                         "segment {} -> {}, ok.",
@@ -118,11 +126,12 @@ fn main() {
                         page.header.this_block_id, page.header.data_crc32,
                     ))
                 };
-                page.save_as_csv(outpath.clone())
+                report_saver::save_page_report(&page, args.freq, outpath.clone(), &settings)
+                    //page.save_as_csv(outpath.clone())
                     .expect("Faild to save page");
                 println!(" => {:?}", outpath);
-            } else if page.header.this_block_id != 0xFFFF_FFFF
-                && page.header.prev_block_id != 0xFFFF_FFFF
+            } else if page.header.this_block_id != u32::MAX
+                && page.header.prev_block_id != u32::MAX
             {
                 std::fs::write(
                     dest.join(format!(
