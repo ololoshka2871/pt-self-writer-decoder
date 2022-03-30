@@ -103,6 +103,10 @@ pub(crate) fn save_page_report<P: AsRef<Path>>(
             );
             let mut has_result = false;
 
+            if page.header.interleave_ratio[0] == 0 || page.header.interleave_ratio[1] == 0 {
+                break;
+            }
+
             if i % page.header.interleave_ratio[0] == 0 {
                 if let Some(fp) = p_iter.next() {
                     c_fp = *fp;

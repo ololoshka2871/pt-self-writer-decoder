@@ -25,6 +25,24 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Debug executable 'pt-self-writer-decoder' mounted flash",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=pt-self-writer-decoder",
+                    "--package=pt-self-writer-decoder"
+                ],
+                "filter": {
+                    "name": "pt-self-writer-decoder",
+                    "kind": "bin"
+                }
+            },
+            "args": ["-d", "/tmp/o", "/var/run/media/tolyan/LOGGER/"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Debug unit tests in executable 'pt-self-writer-decoder'",
             "cargo": {
                 "args": [

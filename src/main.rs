@@ -6,7 +6,8 @@ use std::{env, path::PathBuf};
 
 use structopt::StructOpt;
 
-const DATA_FILE_NAME: &str = "data.hs";
+const FULL_DUMP_FILE_NAME: &str = "data_raw.hs";
+const USED_DUMP_FILE_NAME: &str = "data_use.hs";
 const CONFIG_FILE_NAME: &str = "config.var";
 const STORAGE_FILE_NAME: &str = "storage.var";
 
@@ -17,9 +18,13 @@ struct Cli {
     #[structopt(parse(from_os_str))]
     src: Option<PathBuf>,
 
-    /// Destination dirrectory for output files, default: current dirreectory
+    /// Destination directory for output files, default: current dirreectory
     #[structopt(long, short, parse(from_os_str))]
     dest: Option<PathBuf>,
+
+    /// Process full dump file "data_raw.hs" instead of used "data_use.hs"
+    #[structopt(long)]
+    full: bool,
 
     /// Save frequencies
     #[structopt(long, short)]
@@ -46,7 +51,7 @@ fn verify_input(src_dir: &PathBuf, dest_dir: &PathBuf) -> Result<(), String> {
             src_dir
         ));
     }
-    let data_file_path = src_dir.join(DATA_FILE_NAME);
+    let data_file_path = src_dir.join(FULL_DUMP_FILE_NAME);
     if !data_file_path.exists() {
         return Err(format!("Data file {:?} not found!", data_file_path));
     }
@@ -67,7 +72,7 @@ fn verify_input(src_dir: &PathBuf, dest_dir: &PathBuf) -> Result<(), String> {
     if !dest_dir.is_dir() {
         return Err(format!(
             "Destination dirrectory {:?} is not found!",
-            config_file_path
+            dest_dir
         ));
     }
     Ok(())
@@ -95,7 +100,12 @@ fn main() {
         serde_json::from_str(json_data.as_str()).expect("Failed to parse storage configuration");
 
     println!("Reading data...");
-    let data = std::fs::read(src.join(DATA_FILE_NAME)).expect("Failed to read data file");
+    let data = std::fs::read(src.join(if args.full {
+        FULL_DUMP_FILE_NAME
+    } else {
+        USED_DUMP_FILE_NAME
+    }))
+    .expect("Failed to read data file");
 
     let unpacked_pages = self_recorder_packet::unpack_pages(
         data.as_slice(),
@@ -130,8 +140,7 @@ fn main() {
                     //page.save_as_csv(outpath.clone())
                     .expect("Faild to save page");
                 println!(" => {:?}", outpath);
-            } else if page.header.this_block_id != u32::MAX
-                && page.header.prev_block_id != u32::MAX
+            } else if page.header.this_block_id != u32::MAX && page.header.prev_block_id != u32::MAX
             {
                 std::fs::write(
                     dest.join(format!(
