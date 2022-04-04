@@ -44,14 +44,18 @@ fn get_dir(p: &Option<PathBuf>, direction: &str, current_dir: &PathBuf) -> PathB
     }
 }
 
-fn verify_input(src_dir: &PathBuf, dest_dir: &PathBuf) -> Result<(), String> {
+fn verify_input(src_dir: &PathBuf, dest_dir: &PathBuf, full: bool) -> Result<(), String> {
     if !src_dir.is_dir() {
         return Err(format!(
             "Dirrectory {:?} is not exists or not a dirrectory",
             src_dir
         ));
     }
-    let data_file_path = src_dir.join(FULL_DUMP_FILE_NAME);
+    let data_file_path = src_dir.join(if full {
+        FULL_DUMP_FILE_NAME
+    } else {
+        USED_DUMP_FILE_NAME
+    });
     if !data_file_path.exists() {
         return Err(format!("Data file {:?} not found!", data_file_path));
     }
@@ -78,14 +82,19 @@ fn verify_input(src_dir: &PathBuf, dest_dir: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+fn chain_folder(chain: i32) -> String {
+    format!("chain-{}", chain)
+}
+
 fn main() {
     let args = Cli::from_args();
     let current_dir = env::current_dir().expect("Can't get current dirrectory");
 
     let src = get_dir(&args.src, "Input", &current_dir);
     let dest = get_dir(&args.dest, "Output", &current_dir);
+    let mut chain = 0;
 
-    verify_input(&src, &dest)
+    verify_input(&src, &dest, args.full)
         .map_err(|e| panic!("{}", e))
         .unwrap();
 
@@ -99,7 +108,7 @@ fn main() {
     let storage_cfg: mem_info::MemInfo =
         serde_json::from_str(json_data.as_str()).expect("Failed to parse storage configuration");
 
-    println!("Reading data...");
+    println!("Reading data, it may take several minutes...");
     let data = std::fs::read(src.join(if args.full {
         FULL_DUMP_FILE_NAME
     } else {
@@ -120,11 +129,18 @@ fn main() {
         .for_each(|(i, page)| {
             print!("Decoding page: {}... ", i);
             if page.consistant {
-                let outpath = if page.header.prev_block_id == 0 && page.header.this_block_id == 0 {
-                    print!("start blockchain detected, ok.");
+                let outpath = if (chain == 0)
+                    || (page.header.prev_block_id == 0 && page.header.this_block_id == 0)
+                {
+                    chain += 1;
+                    std::fs::create_dir(dest.join(chain_folder(chain))).expect(
+                        format!("Failed to create dirrectory {}", chain_folder(chain)).as_str(),
+                    );
+                    print!("start blockchain {} detected, ok.", chain);
                     dest.join(format!(
-                        "{:06}-start-0x{:08X}.csv",
-                        i, page.header.data_crc32,
+                        "{}/{:06}+start.csv", // + чтобы при сортировке по имени всегда было выше цыфр
+                        chain_folder(chain),
+                        i,
                     ))
                 } else {
                     print!(
@@ -132,8 +148,10 @@ fn main() {
                         page.header.prev_block_id, page.header.this_block_id
                     );
                     dest.join(format!(
-                        "{:06}-0x{:08X}.csv",
-                        page.header.this_block_id, page.header.data_crc32,
+                        "{}/{:06}-{:06}.csv",
+                        chain_folder(chain),
+                        i,
+                        page.header.this_block_id,
                     ))
                 };
                 report_saver::save_page_report(&page, args.freq, outpath.clone(), &settings)
@@ -144,8 +162,10 @@ fn main() {
             {
                 std::fs::write(
                     dest.join(format!(
-                        "{}-corrupted-0x{:08X}.csv",
-                        i, page.header.data_crc32,
+                        "{}/{}-corrupted-0x{:08X}.csv",
+                        chain_folder(chain),
+                        i,
+                        page.header.data_crc32,
                     )),
                     b"data corrupted",
                 )
