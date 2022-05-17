@@ -23,3 +23,10 @@ __pycache__/
 
 #regs
 *_regs.txt
+
+# stat
+*.svg
+perf*
+
+# data
+data*/

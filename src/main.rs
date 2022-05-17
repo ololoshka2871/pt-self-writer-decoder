@@ -4,6 +4,8 @@ mod report_saver;
 
 use std::{env, path::PathBuf};
 
+use memmap;
+
 use structopt::StructOpt;
 
 const FULL_DUMP_FILE_NAME: &str = "data_raw.hs";
@@ -109,19 +111,26 @@ fn main() {
         serde_json::from_str(json_data.as_str()).expect("Failed to parse storage configuration");
 
     println!("Reading data, it may take several minutes...");
-    let data = std::fs::read(src.join(if args.full {
-        FULL_DUMP_FILE_NAME
-    } else {
-        USED_DUMP_FILE_NAME
-    }))
-    .expect("Failed to read data file");
+    let unpacked_pages = {
+        let file = std::fs::File::open(src.join(if args.full {
+            FULL_DUMP_FILE_NAME
+        } else {
+            USED_DUMP_FILE_NAME
+        }))
+        .expect("Failed to read data file");
 
-    let unpacked_pages = self_recorder_packet::unpack_pages(
-        data.as_slice(),
-        storage_cfg.FlashPageSize as usize,
-        settings.Fref as f32,
-        false,
-    );
+        let data = unsafe {
+            memmap::MmapOptions::new()
+                .map(&file)
+                .expect("Failed to memmap data file")
+        };
+        self_recorder_packet::unpack_pages(
+            &data,
+            storage_cfg.FlashPageSize as usize,
+            settings.Fref as f32,
+            false,
+        )
+    };
 
     unpacked_pages
         .into_iter()
