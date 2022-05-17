@@ -6,6 +6,11 @@ use std::{env, path::PathBuf};
 
 use memmap;
 
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+};
+
+use self_recorder_packet::PageData;
 use structopt::StructOpt;
 
 const FULL_DUMP_FILE_NAME: &str = "data_raw.hs";
@@ -22,7 +27,7 @@ struct Cli {
 
     /// Destination directory for output files, default: current dirreectory
     #[structopt(long, short, parse(from_os_str))]
-    dest: Option<PathBuf>,
+    output: Option<PathBuf>,
 
     /// Process full dump file "data_raw.hs" instead of used "data_use.hs"
     #[structopt(long)]
@@ -31,6 +36,10 @@ struct Cli {
     /// Save frequencies
     #[structopt(long, short)]
     freq: bool,
+
+    /// Verbose output
+    #[structopt(long, short)]
+    verbose: bool,
 }
 
 fn get_dir(p: &Option<PathBuf>, direction: &str, current_dir: &PathBuf) -> PathBuf {
@@ -83,9 +92,13 @@ fn verify_input(src_dir: &PathBuf, dest_dir: &PathBuf, full: bool) -> Result<(),
     }
     Ok(())
 }
-
-fn chain_folder(chain: i32) -> String {
+fn chain_folder(chain: usize) -> String {
     format!("chain-{}", chain)
+}
+
+fn create_chain_filder(dest: &PathBuf, chain: usize) {
+    std::fs::create_dir(dest.join(chain_folder(chain)))
+        .expect(format!("Failed to create dirrectory {}", chain_folder(chain)).as_str())
 }
 
 fn main() {
@@ -93,8 +106,7 @@ fn main() {
     let current_dir = env::current_dir().expect("Can't get current dirrectory");
 
     let src = get_dir(&args.src, "Input", &current_dir);
-    let dest = get_dir(&args.dest, "Output", &current_dir);
-    let mut chain = 0;
+    let dest = get_dir(&args.output, "Output", &current_dir);
 
     verify_input(&src, &dest, args.full)
         .map_err(|e| panic!("{}", e))
@@ -132,56 +144,104 @@ fn main() {
         )
     };
 
-    unpacked_pages
-        .into_iter()
+    let chain_starts = unpacked_pages
+        .par_iter()
         .enumerate()
-        .for_each(|(i, page)| {
-            print!("Decoding page: {}... ", i);
-            if page.consistant {
-                let outpath = if (chain == 0)
-                    || (page.header.prev_block_id == 0 && page.header.this_block_id == 0)
-                {
-                    chain += 1;
-                    std::fs::create_dir(dest.join(chain_folder(chain))).expect(
-                        format!("Failed to create dirrectory {}", chain_folder(chain)).as_str(),
-                    );
-                    print!("start blockchain {} detected, ok.", chain);
-                    dest.join(format!(
-                        "{}/{:06}+start.csv", // + чтобы при сортировке по имени всегда было выше цыфр
-                        chain_folder(chain),
-                        i,
-                    ))
-                } else {
-                    print!(
-                        "segment {} -> {}, ok.",
-                        page.header.prev_block_id, page.header.this_block_id
-                    );
-                    dest.join(format!(
-                        "{}/{:06}-{:06}.csv",
-                        chain_folder(chain),
-                        i,
-                        page.header.this_block_id,
-                    ))
-                };
-                report_saver::save_page_report(&page, args.freq, outpath.clone(), &settings)
-                    //page.save_as_csv(outpath.clone())
-                    .expect("Faild to save page");
-                println!(" => {:?}", outpath);
-            } else if page.header.this_block_id != u32::MAX && page.header.prev_block_id != u32::MAX
-            {
-                std::fs::write(
-                    dest.join(format!(
-                        "{}/{}-corrupted-0x{:08X}.csv",
-                        chain_folder(chain),
-                        i,
-                        page.header.data_crc32,
-                    )),
-                    b"data corrupted",
-                )
-                .expect("Failed to write file");
-                println!("page corrupted!");
+        .filter_map(|(i, page)| {
+            if page.header.prev_block_id == 0 && page.header.this_block_id == 0 {
+                Some(i)
             } else {
-                println!("No data");
+                None
             }
-        });
+        })
+        .collect::<Vec<usize>>();
+
+    if args.verbose {
+        println!("Detected data chains:");
+    }
+    let chains = {
+        let mut chains = Vec::<&[PageData]>::new();
+        // first -> last
+        (0..chain_starts.len() - 1)
+            .enumerate()
+            .for_each(|(i, start)| {
+                let stop = start + 1;
+                let chain_name = i + 1;
+                if args.verbose {
+                    println!(
+                        "chain-{} blocks: {} -> {}",
+                        chain_name,
+                        chain_starts[start],
+                        chain_starts[stop] - 1
+                    );
+                }
+                chains.push(&unpacked_pages[chain_starts[start]..chain_starts[stop] - 1]);
+
+                create_chain_filder(&dest, chain_name);
+            });
+        // last -> end
+        if args.verbose {
+            println!(
+                "chain-{} blocks: {} -> {}",
+                chain_starts.len(),
+                *chain_starts.last().unwrap(),
+                unpacked_pages.len() - 1
+            );
+        }
+        chains.push(&unpacked_pages[*chain_starts.last().unwrap()..unpacked_pages.len() - 1]);
+        create_chain_filder(&dest, chain_starts.len());
+
+        chains
+    };
+
+    chains.into_iter().enumerate().for_each(|(ch, chain)| {
+        let chain_number = ch + 1;
+        println!("Decoding chain: {}... ", chain_number);
+        chain
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(n, page_data)| {
+                if page_data.consistant {
+                    let outpath = if n == 0 {
+                        dest.join(format!(
+                            "{}/{:06}+start.csv", // + чтобы при сортировке по имени всегда было выше цыфр
+                            chain_folder(chain_number),
+                            page_data.header.this_block_id,
+                        ))
+                    } else {
+                        dest.join(format!(
+                            "{}/{:06}.csv",
+                            chain_folder(chain_number),
+                            page_data.header.this_block_id,
+                        ))
+                    };
+                    report_saver::save_page_report(
+                        &page_data,
+                        args.freq,
+                        outpath.clone(),
+                        &settings,
+                    )
+                    .expect("Faild to save page");
+                    if args.verbose {
+                        println!("Decoded page: {}... => {:?}", n, outpath);
+                    }
+                } else if page_data.header.this_block_id != u32::MAX
+                    && page_data.header.prev_block_id != u32::MAX
+                {
+                    std::fs::write(
+                        dest.join(format!(
+                            "{}/{}-corrupted-0x{:08X}.csv",
+                            chain_folder(chain_number),
+                            n,
+                            page_data.header.data_crc32,
+                        )),
+                        b"data corrupted",
+                    )
+                    .expect("Failed to write file");
+                    println!("page corrupted!");
+                } else {
+                    println!("No data");
+                }
+            })
+    });
 }

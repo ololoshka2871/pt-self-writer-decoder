@@ -8,6 +8,7 @@ structopt = { version = "0.3", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 memmap = { version = "0.7.0" }
+rayon = { version = "1.5" }
 
 self-recorder-packet = { git = "https://github.com/ololoshka2871/self-recorder-packet.git" }
 
