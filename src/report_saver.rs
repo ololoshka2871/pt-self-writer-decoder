@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{Result, Write},
+    io::{self, Write},
     path::Path,
     time::Duration,
 };
@@ -12,10 +12,23 @@ pub(crate) fn save_page_report<P: AsRef<Path>>(
     save_freq: bool,
     file: P,
     settings: &crate::app_settings::AppSettings,
-) -> Result<()> {
+) -> io::Result<()> {
+    use crate::app_settings::PressureMeassureUnits;
+
     let mut file = File::create(file)?;
 
-    let write_data_string = move |f: &mut File, ts, fp, ft| -> Result<()> {
+    let mu_multiplier = match settings.pressureMeassureUnits {
+        PressureMeassureUnits::INVALID_ZERO => return Err(io::ErrorKind::InvalidData.into()),
+        PressureMeassureUnits::Pa => 100000.0,
+        PressureMeassureUnits::Bar => 1.0,
+        PressureMeassureUnits::At => 1.0197162,
+        PressureMeassureUnits::mmH20 => 10197.162,
+        PressureMeassureUnits::mHg => 750.06158 / 1000.0,
+        PressureMeassureUnits::Atm => 0.98692327,
+        PressureMeassureUnits::PSI => 14.5,
+    };
+    
+    let write_data_string = move |f: &mut File, ts, fp, ft| -> io::Result<()> {
         f.write_fmt(format_args!(
             "{};{:.6};{:.6}",
             PrettyDuration(ts),
@@ -23,7 +36,7 @@ pub(crate) fn save_page_report<P: AsRef<Path>>(
                 fp,
                 ft,
                 &settings.P_Coefficients,
-                settings.pressureMeassureUnits,
+                mu_multiplier,
                 settings.P_enabled,
                 settings.T_enabled,
             ),
@@ -138,7 +151,7 @@ fn calc_p(
     fp: f32,
     ft: f32,
     coeffs: &crate::app_settings::P16Coeffs,
-    mu: crate::app_settings::PressureMeassureUnits,
+    mu_multiplier: f64,
     p_enabled: bool,
     t_enabled: bool,
 ) -> f32 {
@@ -167,27 +180,10 @@ fn calc_p(
 
         let p = k0 + presf_minus_fp0 * (k1 + presf_minus_fp0 * (k2 + presf_minus_fp0 * k3));
 
-        wrap_mu(p, mu) as f32
+        (p * mu_multiplier) as f32
     } else {
         f32::NAN
     }
-}
-
-fn wrap_mu(p: f64, mu: crate::app_settings::PressureMeassureUnits) -> f64 {
-    use crate::app_settings::PressureMeassureUnits;
-
-    let multiplier = match mu {
-        PressureMeassureUnits::INVALID_ZERO => panic!(),
-        PressureMeassureUnits::Pa => 100000.0,
-        PressureMeassureUnits::Bar => 1.0,
-        PressureMeassureUnits::At => 1.0197162,
-        PressureMeassureUnits::mmH20 => 10197.162,
-        PressureMeassureUnits::mHg => 750.06158 / 1000.0,
-        PressureMeassureUnits::Atm => 0.98692327,
-        PressureMeassureUnits::PSI => 14.5,
-    };
-
-    p * multiplier
 }
 
 fn calc_t(f: f32, coeffs: &crate::app_settings::T5Coeffs, t_enabled: bool) -> f32 {

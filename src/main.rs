@@ -108,7 +108,7 @@ fn main() {
                 }
                 chains.push(&unpacked_pages[chain_starts[start]..chain_starts[stop] - 1]);
 
-                create_chain_filder(&dest, chain_name);
+                create_chain_folder(&dest, chain_name);
             });
         // last -> end
         if args.verbose {
@@ -120,7 +120,7 @@ fn main() {
             );
         }
         chains.push(&unpacked_pages[*chain_starts.last().unwrap()..unpacked_pages.len() - 1]);
-        create_chain_filder(&dest, chain_starts.len());
+        create_chain_folder(&dest, chain_starts.len());
 
         chains
     };
@@ -135,7 +135,7 @@ fn main() {
                 if page_data.consistant {
                     let outpath = if n == 0 {
                         dest.join(format!(
-                            "{}/{:06}+start.csv", // + чтобы при сортировке по имени всегда было выше цыфр
+                            "{}/{:06}+start.csv", // "+" чтобы при сортировке по имени всегда было выше цыфр
                             chain_folder(chain_number),
                             page_data.header.this_block_id,
                         ))
@@ -182,7 +182,7 @@ fn detect_chains_starts(unpacked_pages: &Vec<PageData>) -> Vec<usize> {
         .par_iter()
         .enumerate()
         .filter_map(|(i, page)| {
-            if page.header.prev_block_id == 0 && page.header.this_block_id == 0 {
+            if page.consistant && page.header.prev_block_id == 0 && page.header.this_block_id == 0 {
                 Some(i)
             } else {
                 None
@@ -245,7 +245,7 @@ fn chain_folder(chain: usize) -> String {
     format!("chain-{}", chain)
 }
 
-fn create_chain_filder(dest: &PathBuf, chain: usize) {
+fn create_chain_folder(dest: &PathBuf, chain: usize) {
     std::fs::create_dir(dest.join(chain_folder(chain)))
         .expect(format!("Failed to create dirrectory {}", chain_folder(chain)).as_str())
 }
