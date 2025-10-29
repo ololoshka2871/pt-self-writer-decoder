@@ -16,6 +16,13 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
+      - name: Install root certificate
+        run: |
+          mkdir -p /usr/share/ca-certificates/extra
+          echo "${{ vars.SCTB_ROOT_CERT }}" > /usr/share/ca-certificates/extra/sctb.crt
+          echo "extra/sctb.crt" >> /etc/ca-certificates.conf
+          update-ca-certificates          
+
       - name: Install Rust nightly with x86_64-pc-windows-gnu target
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly --target x86_64-pc-windows-gnu,x86_64-unknown-linux-gnu --profile minimal
