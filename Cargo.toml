@@ -1,16 +1,13 @@
 [package]
 name = "pt-self-writer-decoder"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2018"
 
 [dependencies]
 structopt = { version = "0.3", default-features = false }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
 memmap = { version = "0.7.0" }
 rayon = { version = "1.5" }
 
-self-recorder-packet = { git = "https://github.com/ololoshka2871/self-recorder-packet.git" }
-
-[profile.release]
-debug = true
+self-recorder-packet = { git = "https://gitea.sctbelpa/SCTBElpa/self-recorder-packet.git", rev = "e25058f91e6b95ef3783569ef783c62e39d28c8c" }

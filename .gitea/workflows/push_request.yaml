@@ -1,0 +1,30 @@
+name: Push Request Workflow
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - master
+      - "*/*"
+
+# Caching proxy
+env:
+  http_proxy: ${{ vars.HTTP_PROXY }}
+  https_proxy: ${{ vars.HTTP_PROXY }}
+  NODE_TLS_REJECT_UNAUTHORIZED: 0
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install Rust nightly with x86_64-pc-windows-gnu target
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly --target x86_64-pc-windows-gnu,x86_64-unknown-linux-gnu --profile minimal
+          echo "${HOME}/.cargo/bin" >> $GITHUB_PATH
+
+      - uses: actions/checkout@master
+
+      - name: Compile Windows
+        run: argo build --release --target x86_64-pc-windows-gnu
+
+      - name: Compile Linux
+        run: cargo build --release --target x86_64-unknown-linux-gnu
