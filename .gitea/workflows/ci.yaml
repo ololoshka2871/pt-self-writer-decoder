@@ -28,7 +28,16 @@ jobs:
 
       - uses: actions/checkout@master
 
+      - name: install crates.io mirror
+        run: |
+          mkdir -p .cargo/
+          echo '${{ vars.CARGO_MIRROR_DEFINE }}' >> .cargo/config.toml
+          cat .cargo/config.toml   
+
       - name: Compile Windows
+        env:
+          http_proxy: ""
+          https_proxy: ""
         run: cargo build --release --target x86_64-pc-windows-gnu
 
       - uses: akkuman/gitea-release-action@v1
