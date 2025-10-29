@@ -1,0 +1,53 @@
+name: Build for Windows (GNU)
+on:
+  push:
+    tags:
+      - "v*"
+
+# Caching proxy
+env:
+  http_proxy: ${{ vars.HTTP_PROXY }}
+  https_proxy: ${{ vars.HTTP_PROXY }}
+  NODE_TLS_REJECT_UNAUTHORIZED: 0
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install root certificate
+        run: |
+          mkdir -p /usr/share/ca-certificates/extra
+          echo "${{ vars.SCTB_ROOT_CERT }}" > /usr/share/ca-certificates/extra/sctb.crt
+          echo "extra/sctb.crt" >> /etc/ca-certificates.conf
+          update-ca-certificates
+
+      - name: Install Rust nightly with x86_64-pc-windows-gnu target
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly --target x86_64-pc-windows-gnu,x86_64-unknown-linux-gnu --profile minimal
+          echo "${HOME}/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install x86_64-w64-mingw32-gcc
+        run: |
+          sudo apt update
+          sudo apt install -y gcc-mingw-w64-x86-64
+
+      - uses: actions/checkout@master
+
+      - name: install crates.io mirror
+        run: |
+          mkdir -p .cargo/
+          echo '${{ vars.CARGO_MIRROR_DEFINE }}' >> .cargo/config.toml
+          cat .cargo/config.toml
+
+      - name: Compile Windows
+        env:
+          http_proxy: ""
+          https_proxy: ""
+        run: cargo build --release --target x86_64-pc-windows-gnu
+
+      - uses: akkuman/gitea-release-action@v1
+        with:
+          body: This is an automatic release!
+          prerelease: true
+          files: |
+            target/x86_64-pc-windows-gnu/release/pt-self-writer-decoder.exe

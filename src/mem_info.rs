@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[allow(non_snake_case)]
+#[allow(non_snake_case, unused)]
 #[derive(Deserialize, Debug)]
 pub struct MemInfo {
     pub FlashPageSize: u32,
