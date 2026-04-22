@@ -2,10 +2,24 @@ use std::{
     fs::File,
     io::{Result, Write},
     path::Path,
-    time::Duration,
 };
 
-use self_recorder_packet::{PageData, PrettyDuration, Record};
+use self_recorder_packet::{PageData, Record};
+
+// Константа для преобразования из "год 0000" в UNIX EPOCH
+// 0000-01-01 00:00:00.000 до 1970-01-01 00:00:00.000
+const FROM_YEAR_ZERO_TO_UNIX_EPOCH_MS: i128 = 62167132800000;
+
+pub fn format_timestamp<'a>(
+    format: &'a Vec<time::format_description::BorrowedFormatItem<'a>>,
+    ts: u64,
+) -> String {
+    let datetime = time::OffsetDateTime::from_unix_timestamp_nanos(
+        (ts as i128 - FROM_YEAR_ZERO_TO_UNIX_EPOCH_MS) * 1_000_000,
+    )
+    .expect("Invalid timestamp");
+    datetime.format(format).unwrap()
+}
 
 pub(crate) fn save_page_report<P: AsRef<Path>>(
     page: &PageData,
@@ -15,19 +29,22 @@ pub(crate) fn save_page_report<P: AsRef<Path>>(
 ) -> Result<()> {
     let mut file = File::create(file)?;
 
-    let write_data_string = move |f: &mut File, ts, fp, ft| -> Result<()> {
+    let format: Vec<time::format_description::BorrowedFormatItem<'_>> =
+        time::format_description::parse(
+            "[year].[month].[day] [hour]:[minute]:[second].[subsecond digits:3]",
+        )
+        .unwrap();
+
+    let write_data_string = |f: &mut File, ts, fp, ft| -> Result<()> {
         f.write_fmt(format_args!(
-            "{};{:.6};{:.6}",
-            PrettyDuration(ts),
-            calc_p(
-                fp,
-                ft,
-                &settings.P_Coefficients,
-                settings.pressureMeassureUnits,
-                settings.P_enabled,
-                settings.T_enabled,
+            "{:?};{:.6};{:.6}",
+            format_timestamp(&format, ts),
+            settings.pressure_meassure_units.wrap(
+                settings
+                    .p_coefficients
+                    .calc(Some(fp as f64), Some(ft as f64))
             ),
-            calc_t(ft, &settings.T_Coefficients, settings.T_enabled,)
+            settings.t_coefficients.calc(Some(ft as f64)),
         ))?;
 
         if save_freq {
@@ -50,10 +67,9 @@ pub(crate) fn save_page_report<P: AsRef<Path>>(
         ))?;
     }
 
-    let start = Duration::from_millis(page.header.timestamp);
     file.write_fmt(format_args!(
         "Время начала страницы;{}\n",
-        PrettyDuration(start)
+        format_timestamp(&format, page.header.timestamp)
     ))?;
     file.write_fmt(format_args!(
         "Базовый интервал;{};мс.\n",
@@ -69,7 +85,7 @@ pub(crate) fn save_page_report<P: AsRef<Path>>(
     file.write("Время;".as_bytes())?;
     file.write_fmt(format_args!(
         "Давление, {:?};Температура, *С;",
-        settings.pressureMeassureUnits
+        settings.pressure_meassure_units
     ))?;
     if save_freq {
         file.write("Частота давления, Гц;Частота температуры, Гц".as_bytes())?;
@@ -90,17 +106,10 @@ pub(crate) fn save_page_report<P: AsRef<Path>>(
             Record::default()
         };
 
-        write_data_string(
-            &mut file,
-            Duration::from_millis(page.header.timestamp),
-            c_fp.freq,
-            c_ft.freq,
-        )?;
+        write_data_string(&mut file, page.header.timestamp, c_fp.freq, c_ft.freq)?;
 
         for i in 1.. {
-            let timstamp = Duration::from_millis(
-                page.header.timestamp + (i * page.header.base_interval_ms) as u64,
-            );
+            let timstamp = page.header.timestamp + (i * page.header.base_interval_ms) as u64;
             let mut has_result = false;
 
             if page.header.interleave_ratio[0] == 0 || page.header.interleave_ratio[1] == 0 {
@@ -132,77 +141,4 @@ pub(crate) fn save_page_report<P: AsRef<Path>>(
     }
 
     Ok(())
-}
-
-fn calc_p(
-    fp: f32,
-    ft: f32,
-    coeffs: &crate::app_settings::P16Coeffs,
-    mu: crate::app_settings::PressureMeassureUnits,
-    p_enabled: bool,
-    t_enabled: bool,
-) -> f32 {
-    if p_enabled {
-        let presf_minus_fp0 = fp as f64 - coeffs.Fp0 as f64;
-        let ft_minus_ft0 = if !t_enabled || ft.is_nan() {
-            0.0f64
-        } else {
-            ft as f64 - coeffs.Ft0 as f64
-        };
-
-        let a = &coeffs.A;
-
-        let k0 = a[0] as f64
-            + ft_minus_ft0
-                * (a[1] as f64 + ft_minus_ft0 * (a[2] as f64 + ft_minus_ft0 * a[12] as f64));
-        let k1 = a[3] as f64
-            + ft_minus_ft0
-                * (a[5] as f64 + ft_minus_ft0 * (a[7] as f64 + ft_minus_ft0 * a[13] as f64));
-        let k2 = a[4] as f64
-            + ft_minus_ft0
-                * (a[6] as f64 + ft_minus_ft0 * (a[8] as f64 + ft_minus_ft0 * a[14] as f64));
-        let k3 = a[9] as f64
-            + ft_minus_ft0
-                * (a[10] as f64 + ft_minus_ft0 * (a[11] as f64 + ft_minus_ft0 * a[15] as f64));
-
-        let p = k0 + presf_minus_fp0 * (k1 + presf_minus_fp0 * (k2 + presf_minus_fp0 * k3));
-
-        wrap_mu(p, mu) as f32
-    } else {
-        f32::NAN
-    }
-}
-
-fn wrap_mu(p: f64, mu: crate::app_settings::PressureMeassureUnits) -> f64 {
-    use crate::app_settings::PressureMeassureUnits;
-
-    let multiplier = match mu {
-        PressureMeassureUnits::INVALID_ZERO => panic!(),
-        PressureMeassureUnits::Pa => 100000.0,
-        PressureMeassureUnits::Bar => 1.0,
-        PressureMeassureUnits::At => 1.0197162,
-        PressureMeassureUnits::mmH20 => 10197.162,
-        PressureMeassureUnits::mHg => 750.06158 / 1000.0,
-        PressureMeassureUnits::Atm => 0.98692327,
-        PressureMeassureUnits::PSI => 14.5,
-    };
-
-    p * multiplier
-}
-
-fn calc_t(f: f32, coeffs: &crate::app_settings::T5Coeffs, t_enabled: bool) -> f32 {
-    if t_enabled {
-        let temp_f_minus_fp0 = f as f64 - coeffs.F0 as f64;
-        let mut result = coeffs.T0 as f64;
-        let mut mu = temp_f_minus_fp0;
-
-        for i in 0..3 {
-            result += mu * coeffs.C[i] as f64;
-            mu *= temp_f_minus_fp0;
-        }
-
-        result as f32
-    } else {
-        f32::NAN
-    }
 }

@@ -19,7 +19,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["-d", "/tmp/r", "data3"],
+            "args": ["data/01"],
             "cwd": "${workspaceFolder}"
         },
         {
