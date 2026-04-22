@@ -79,9 +79,9 @@ fn main() {
         };
         self_recorder_packet::unpack_pages(
             &data,
-            storage_cfg.FlashPageSize as usize,
-            settings.Fref as f32,
+            storage_cfg.block_size_bytes as usize,
             false,
+            storage_cfg.freq_multiplier,
         )
     };
 

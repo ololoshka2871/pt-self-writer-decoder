@@ -1,59 +1,123 @@
-#![allow(non_snake_case)]
-#![allow(non_camel_case_types)]
-#![allow(dead_code)]
+use serde::{Serialize, Deserialize};
+use serde::Deserializer;
 
-use serde::Deserialize;
-
-pub const P_COEFFS_COUNT: usize = 16;
-pub const T_COEFFS_COUNT: usize = 5;
-
-#[derive(Debug, Copy, Clone, Deserialize)]
-pub(crate) struct P16Coeffs {
-    pub Fp0: f32,
-    pub Ft0: f32,
-    pub A: [f32; P_COEFFS_COUNT],
+fn null_as_nan<'de, D>(deserializer: D) -> Result<f32, D::Error>
+where D: Deserializer<'de> {
+    Ok(Option::deserialize(deserializer)?.unwrap_or(f32::NAN))
 }
 
-#[derive(Debug, Copy, Clone, Deserialize)]
-pub(crate) struct T5Coeffs {
-    pub F0: f32,
-    pub T0: f32,
-    pub C: [f32; T_COEFFS_COUNT],
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct P16Coeffs {
+    pub fp0: f32,
+    pub ft0: f32,
+    pub a: [f32; 16],
 }
 
-#[derive(Debug, Copy, Clone, Deserialize)]
-pub(crate) struct WorkRange {
+impl P16Coeffs {
+    pub fn calc(&self, f: Option<f64>, t: Option<f64>) -> f64 {
+        match (f, t) {
+            (Some(f), t) => {
+                let presf_minus_fp0 = f - self.fp0 as f64;
+                let ft_minus_ft0 = if let Some(t) = t {
+                    t - self.ft0 as f64
+                } else {
+                    0.0
+                };
+
+                let a = &self.a;
+
+                let k0 = a[0] as f64
+                    + ft_minus_ft0
+                        * (a[1] as f64
+                            + ft_minus_ft0 * (a[2] as f64 + ft_minus_ft0 * a[12] as f64));
+                let k1 = a[3] as f64
+                    + ft_minus_ft0
+                        * (a[5] as f64
+                            + ft_minus_ft0 * (a[7] as f64 + ft_minus_ft0 * a[13] as f64));
+                let k2 = a[4] as f64
+                    + ft_minus_ft0
+                        * (a[6] as f64
+                            + ft_minus_ft0 * (a[8] as f64 + ft_minus_ft0 * a[14] as f64));
+                let k3 = a[9] as f64
+                    + ft_minus_ft0
+                        * (a[10] as f64
+                            + ft_minus_ft0 * (a[11] as f64 + ft_minus_ft0 * a[15] as f64));
+
+                let p = k0 + presf_minus_fp0 * (k1 + presf_minus_fp0 * (k2 + presf_minus_fp0 * k3));
+
+                p
+            }
+            _ => f64::NAN,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct T5Coeffs {
+    pub f0: f32,
+    pub t0: f32,
+    pub c: [f32; 5],
+}
+
+impl T5Coeffs {
+    pub fn calc(&self, f: Option<f64>) -> f64 {
+        if let Some(f) = f {
+            let temp_f_minus_fp0 = f - self.f0 as f64;
+            let mut result = self.t0 as f64;
+            let mut mu = temp_f_minus_fp0;
+
+            for i in 0..self.c.len() {
+                result += mu * self.c[i] as f64;
+                mu *= temp_f_minus_fp0;
+            }
+
+            result
+        } else {
+            f64::NAN
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct WorkRange {
     pub minimum: f32,
     pub maximum: f32,
-    pub absolute_maximum: Option<f32>,
+    #[serde(deserialize_with = "null_as_nan")]
+    pub absolute_maximum: f32,
 }
 
-#[derive(Debug, Copy, Clone, Deserialize)]
-pub(crate) struct CalibrationDate {
-    pub Day: u32,
-    pub Month: u32,
-    pub Year: u32,
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct CalibrationDate {
+    pub day: u32,
+    pub month: u32,
+    pub year: u32,
 }
 
-#[derive(Debug, Copy, Clone, Deserialize)]
-pub(crate) struct WriteConfig {
-    pub BaseInterval_ms: u32,
-    pub PWriteDevider: u32,
-    pub TWriteDevider: u32,
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct WriteConfig {
+    pub base_interval_ms: u32,
+    pub p_write_devider: u32,
+    pub t_write_devider: u32,
 }
 
 #[repr(packed(1))]
-#[derive(Debug, Copy, Clone, Deserialize, Default)]
-pub(crate) struct Monitoring {
-    pub Ovarpress: bool,
-    pub Ovarheat: bool,
-    pub CPUOvarheat: bool,
-    pub OverPower: bool,
+#[derive(Debug, Copy, Clone, Serialize, Deserialize,     Default, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct Monitoring {
+    pub overpress: bool,
+    pub overheat: bool,
+    pub cpu_overheat: bool,
+    pub over_power: bool,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
-pub(crate) enum PressureMeassureUnits {
-    INVALID_ZERO = 0,
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum PressureMeassureUnits {
+    InvalidZero = 0,
 
     // Паскали
     Pa = 0x00220000,
@@ -65,10 +129,10 @@ pub(crate) enum PressureMeassureUnits {
     At = 0x00A10000,
 
     // мм водного столба
-    mmH20 = 0x00A20000,
+    MmH20 = 0x00A20000,
 
     // м. ртутного столба
-    mHg = 0x00A30000,
+    MHg = 0x00A30000,
 
     // Атм
     Atm = 0x00A40000,
@@ -77,43 +141,48 @@ pub(crate) enum PressureMeassureUnits {
     PSI = 0x00AB0000,
 }
 
-#[derive(Debug, Copy, Clone, Deserialize)]
-pub(crate) struct AppSettings {
-    pub Serial: u32,
-    pub PMesureTime_ms: u32,
-    pub TMesureTime_ms: u32,
+impl PressureMeassureUnits {
+    pub fn wrap(&self, value: f64) -> f64 {
+        let multiplier = match self {
+            PressureMeassureUnits::InvalidZero => 0.0,
+            PressureMeassureUnits::Pa => 100000.0,
+            PressureMeassureUnits::Bar => 1.0,
+            PressureMeassureUnits::At => 1.0197162,
+            PressureMeassureUnits::MmH20 => 10197.162,
+            PressureMeassureUnits::MHg => 750.06158 / 1000.0,
+            PressureMeassureUnits::Atm => 0.98692327,
+            PressureMeassureUnits::PSI => 14.5,
+        };
 
-    pub Fref: u32,
+        value * multiplier
+    }
+}
 
-    pub P_enabled: bool,
-    pub T_enabled: bool,
-    pub TCPUEnabled: bool,
-    pub VBatEnabled: bool,
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct AppSettings {
+    pub serial: u32,
 
-    pub P_Coefficients: P16Coeffs,
-    pub T_Coefficients: T5Coeffs,
+    pub fref: u32,
 
-    pub PWorkRange: WorkRange,
-    pub TWorkRange: WorkRange,
-    pub TCPUWorkRange: WorkRange,
-    pub VbatWorkRange: WorkRange,
+    pub p_coefficients: P16Coeffs,
+    pub t_coefficients: T5Coeffs,
 
-    pub PZeroCorrection: f32,
-    pub TZeroCorrection: f32,
+    pub p_work_range: WorkRange,
+    pub t_work_range: WorkRange,
+    pub t_cpu_work_range: WorkRange,
+    pub vbat_work_range: WorkRange,
+
+    pub p_zero_correction: f32,
+    pub t_zero_correction: f32,
 
     pub calibration_date: CalibrationDate,
 
-    pub writeConfig: WriteConfig,
+    pub write_config: WriteConfig,
 
-    pub startDelay: u32,
+    pub start_delay: u32,
 
-    pub pressureMeassureUnits: PressureMeassureUnits,
+    pub pressure_meassure_units: PressureMeassureUnits,
 
     pub monitoring: Monitoring,
-}
-
-impl Monitoring {
-    pub fn is_set(&self) -> bool {
-        self.Ovarpress | self.Ovarheat | self.CPUOvarheat | self.OverPower
-    }
 }
